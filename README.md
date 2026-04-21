@@ -1,3 +1,4 @@
 # Mini Compilador
-## Lenguaje Pseudo Codigo "Psedu-C"
+## Lenguaje Pseudo Codigo "Pseudo-C"
+
 
