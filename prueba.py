@@ -3,16 +3,16 @@ from sintactico import *
 from semantico import *
 
 codigoPrueba = """
-inicio
-    a = 10
-    b = 20
-    c = a + b * 2
-    si (c > 30) entonces
-        escribir(c)
-        d = c - 10
-    finsi
-    escribir(d)
-fin
+int x = 10;
+void test(int a) {
+    int y = a * 2;
+    {
+        float x = 5.5; 
+        y = y + x;
+    }
+    x = y + 1;
+    escribir(z);    
+}
 """
 
 tokens = identificarTokens(codigoPrueba)
@@ -26,9 +26,21 @@ print("=======Analisis Sintactico ===========")
 try:
     print("Iniciando analisis sintactico")
     parser = Parse(tokens)
-    arbol_ast = parser.parsear()
-    print("Analisis sintactico exitoso")
-    print("==========Asembler=========")
-    print(arbol_ast.generarCodigo)
+    arbol_ast = parser.parsear() 
 except SyntaxError as e:
     print(f"Error sintáctico: {e}")
+
+print("=======Analisis Semantico ===========")
+try:
+    print("Iniciando analisis semantico")
+    semantico = AnalizadorSemantico()
+    semantico.analizar(arbol_ast)
+    print("Analisis semantico exitoso")
+except Exception as e:
+    print(f"Error semantico: {e}")
+
+print("=======Momentos ===========")
+try:
+    print(semantico.imprimir_ambitos())
+except Exception as e:
+    print(f"Error al ejecutar: {e}")

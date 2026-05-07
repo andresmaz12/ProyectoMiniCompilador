@@ -4,10 +4,10 @@ import re
 tokenPatron = {
     "CADENA": r'"[^"]*"',
     "NUMERO": r'\b\d+(?:\.\d+)?\b',
-    "PALABRA_CLAVE": r'\b(inicio|fin|finsi|si|sino|entonces|mientras|finmientras|escribir|leer|entero|flotante|cadena|retorna|metodo)\b',
+    "PALABRA_CLAVE": r'\b(inicio|fin|finsi|si|sino|entonces|mientras|finmientras|escribir|leer|entero|flotante|cadena|retorna|metodo|int|float|void)\b',
     "IDENTIFICADOR": r'\b[a-zA-Z_][a-zA-Z0-9_]*\b',
     "OPERADOR": r'>=|<=|==|!=|[+\-*/=<>]',
-    "DELIMITADOR": r'[(),]',
+    "DELIMITADOR": r'[(),;{}]',
     "ESPACIO_BLANCO": r'\s+',
 }
 

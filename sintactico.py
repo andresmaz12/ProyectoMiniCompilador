@@ -18,6 +18,16 @@ class NodoPrograma(NodoAST):
        codigo.append("    int 0x80")
        return "\n".join(data) + "\n" + "\n".join(codigo)
 
+class NodoDeclaracion(NodoAST):
+    def __init__(self, tipo, nombre, expresion=None):
+        self.tipo = tipo
+        self.nombre = nombre
+        self.expresion = expresion
+
+class NodoBloque(NodoAST):
+    def __init__(self, instrucciones):
+        self.instrucciones = instrucciones
+
 class NodoAsignacion(NodoAST):
     def __init__(self, nombre, expresion):
         self.nombre = nombre
@@ -99,15 +109,16 @@ class NodoRetorno(NodoAST):
         return self.expresion.generarCodigo()
 
 class NodoFuncion(NodoAST):
-    def __init__(self, tipo, nombre, parametros, cuerpo):
-      self.tipo = tipo
+    def __init__(self, tipo_retorno, nombre, parametros, cuerpo):
+      self.tipo_retorno = tipo_retorno
       self.nombre = nombre
       self.parametros = parametros
       self.cuerpo = cuerpo
 
     def generarCodigo(self):
         codigo = f"{self.nombre}:\n"
-        codigo += "\n".join(c.generarCodigo() for c in self.cuerpo)
+        # cuerpo es NodoBloque ahora
+        codigo += self.cuerpo.generarCodigo()
         codigo += "\n    ret\n"
         return codigo
 
@@ -141,22 +152,6 @@ class NodoIncremento(NodoAST):
 
 
 #---------------------------- PARSER ---------------------------------
-# Gramática reconocida:
-#
-#   programa       -> 'inicio' cuerpo 'fin'
-#   cuerpo         -> instruccion*
-#   instruccion    -> asignacion | condicional | ciclo_mientras | escribir | leer
-#   asignacion     -> IDENTIFICADOR '=' expresion
-#   condicional    -> 'si' '(' expresion ')' 'entonces' cuerpo ('sino' cuerpo)? 'finsi'
-#   ciclo_mientras -> 'mientras' '(' expresion ')' cuerpo 'finmientras'
-#   escribir       -> 'escribir' '(' expresion (',' expresion)* ')'
-#   leer           -> 'leer' '(' IDENTIFICADOR ')'
-#   expresion      -> comparacion
-#   comparacion    -> aritmetica (OP_COMP aritmetica)?
-#   aritmetica     -> termino (('+' | '-') termino)*
-#   termino        -> factor (('*' | '/') factor)*
-#   factor         -> NUMERO | IDENTIFICADOR | CADENA | '(' expresion ')'
-
 class Parse:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -186,35 +181,63 @@ class Parse:
     # ── Punto de entrada ──────────────────────────────────────────────
 
     def parsear(self):
-        nodo = self.programa()
-        if self.obtener_token() is not None:
-            raise SyntaxError(
-                f"Tokens sobrantes después de 'fin': {self.obtener_token()}"
-            )
-        return nodo
-
-    # ── Programa ──────────────────────────────────────────────────────
-
-    def programa(self):
-        self.coincidir_valor('inicio')
-        instrucciones = self.cuerpo(['fin'])
-        self.coincidir_valor('fin')
+        instrucciones = []
+        while self.obtener_token() is not None:
+            instrucciones.append(self.declaracion_global_o_funcion())
         return NodoPrograma(instrucciones)
 
-    # ── Cuerpo (lista de instrucciones hasta un terminador) ───────────
+    def declaracion_global_o_funcion(self):
+        tipo = self.coincidir('PALABRA_CLAVE')
+        nombre = self.coincidir('IDENTIFICADOR')
+        
+        if self.obtener_token() and self.obtener_token()[1] == '(':
+            self.coincidir_valor('(')
+            parametros = []
+            if self.obtener_token() and self.obtener_token()[1] != ')':
+                p_tipo = self.coincidir('PALABRA_CLAVE')
+                p_nombre = self.coincidir('IDENTIFICADOR')
+                parametros.append(NodoParametro(p_tipo, p_nombre))
+                while self.obtener_token() and self.obtener_token()[1] == ',':
+                    self.coincidir_valor(',')
+                    p_tipo = self.coincidir('PALABRA_CLAVE')
+                    p_nombre = self.coincidir('IDENTIFICADOR')
+                    parametros.append(NodoParametro(p_tipo, p_nombre))
+            self.coincidir_valor(')')
+            cuerpo = self.bloque()
+            return NodoFuncion(tipo, nombre, parametros, cuerpo)
+        else:
+            expr = None
+            if self.obtener_token() and self.obtener_token()[1] == '=':
+                self.coincidir_valor('=')
+                expr = self.expresion()
+            self.coincidir_valor(';')
+            return NodoDeclaracion(tipo, nombre, expr)
 
-    def cuerpo(self, terminadores):
+    def bloque(self):
+        self.coincidir_valor('{')
         instrucciones = []
-        while self.obtener_token() and self.obtener_token()[1] not in terminadores:
+        while self.obtener_token() and self.obtener_token()[1] != '}':
             instrucciones.append(self.instruccion())
-        return instrucciones
-
-    # ── Despacho de instrucciones ─────────────────────────────────────
+        self.coincidir_valor('}')
+        return NodoBloque(instrucciones)
 
     def instruccion(self):
         tok = self.obtener_token()
         if tok is None:
             raise SyntaxError("Se esperaba una instrucción pero se llegó al final del archivo")
+
+        if tok[1] == '{':
+            return self.bloque()
+
+        if tok[1] in ('int', 'float', 'void', 'entero', 'flotante', 'cadena'):
+            tipo = self.coincidir('PALABRA_CLAVE')
+            nombre = self.coincidir('IDENTIFICADOR')
+            expr = None
+            if self.obtener_token() and self.obtener_token()[1] == '=':
+                self.coincidir_valor('=')
+                expr = self.expresion()
+            self.coincidir_valor(';')
+            return NodoDeclaracion(tipo, nombre, expr)
 
         if tok[1] == 'si':
             return self.condicional()
@@ -224,49 +247,50 @@ class Parse:
             return self.llamadaEscribir()
         if tok[1] == 'leer':
             return self.llamadaLeer()
+        
         if tok[0] == 'IDENTIFICADOR':
-            return self.asignacion()
+            if self.pos + 1 < len(self.tokens) and self.tokens[self.pos+1][1] == '(':
+                nombre = self.coincidir('IDENTIFICADOR')
+                self.coincidir_valor('(')
+                args = []
+                if self.obtener_token() and self.obtener_token()[1] != ')':
+                    args.append(self.expresion())
+                    while self.obtener_token() and self.obtener_token()[1] == ',':
+                        self.coincidir_valor(',')
+                        args.append(self.expresion())
+                self.coincidir_valor(')')
+                self.coincidir_valor(';')
+                return NodoLlamadaFuncion(nombre, args)
+            else:
+                nombre = self.coincidir('IDENTIFICADOR')
+                self.coincidir_valor('=')
+                expr = self.expresion()
+                self.coincidir_valor(';')
+                return NodoAsignacion(nombre, expr)
 
         raise SyntaxError(f"Instrucción no reconocida: {tok}")
-
-    # ── Asignación: IDENT '=' expresion ───────────────────────────────
-
-    def asignacion(self):
-        nombre = self.coincidir('IDENTIFICADOR')
-        self.coincidir_valor('=')
-        expr = self.expresion()
-        return NodoAsignacion(nombre, expr)
-
-    # ── Condicional: si (expr) entonces cuerpo [sino cuerpo] finsi ───
 
     def condicional(self):
         self.coincidir_valor('si')
         self.coincidir_valor('(')
         condicion = self.expresion()
         self.coincidir_valor(')')
-        self.coincidir_valor('entonces')
-        cuerpo_si = self.cuerpo(['finsi', 'sino'])
+        cuerpo_si = self.bloque()
 
-        cuerpo_sino = []
+        cuerpo_sino = None
         if self.obtener_token() and self.obtener_token()[1] == 'sino':
             self.coincidir_valor('sino')
-            cuerpo_sino = self.cuerpo(['finsi'])
+            cuerpo_sino = self.bloque()
 
-        self.coincidir_valor('finsi')
         return NodoCondicional(condicion, cuerpo_si, cuerpo_sino)
-
-    # ── Mientras: mientras (expr) cuerpo finmientras ──────────────────
 
     def cicloMientras(self):
         self.coincidir_valor('mientras')
         self.coincidir_valor('(')
         condicion = self.expresion()
         self.coincidir_valor(')')
-        cuerpo = self.cuerpo(['finmientras'])
-        self.coincidir_valor('finmientras')
+        cuerpo = self.bloque()
         return NodoWhile(condicion, cuerpo)
-
-    # ── Escribir: escribir(expr, ...) ─────────────────────────────────
 
     def llamadaEscribir(self):
         self.coincidir_valor('escribir')
@@ -276,19 +300,16 @@ class Parse:
             self.coincidir_valor(',')
             argumentos.append(self.expresion())
         self.coincidir_valor(')')
+        self.coincidir_valor(';')
         return NodoImprimir(argumentos)
-
-    # ── Leer: leer(IDENT) ────────────────────────────────────────────
 
     def llamadaLeer(self):
         self.coincidir_valor('leer')
         self.coincidir_valor('(')
         variable = self.coincidir('IDENTIFICADOR')
         self.coincidir_valor(')')
+        self.coincidir_valor(';')
         return NodoEntrada(variable)
-
-    # ── Expresiones con precedencia ──────────────────────────────────
-    #    Precedencia (menor a mayor): comparación → suma/resta → mult/div → factor
 
     def expresion(self):
         return self.comparacion()
@@ -326,7 +347,19 @@ class Parse:
             return NodoNumero(self.coincidir('NUMERO'))
 
         if token[0] == 'IDENTIFICADOR':
-            return NodoIdent(self.coincidir('IDENTIFICADOR'))
+            if self.pos + 1 < len(self.tokens) and self.tokens[self.pos+1][1] == '(':
+                nombre = self.coincidir('IDENTIFICADOR')
+                self.coincidir_valor('(')
+                args = []
+                if self.obtener_token() and self.obtener_token()[1] != ')':
+                    args.append(self.expresion())
+                    while self.obtener_token() and self.obtener_token()[1] == ',':
+                        self.coincidir_valor(',')
+                        args.append(self.expresion())
+                self.coincidir_valor(')')
+                return NodoLlamadaFuncion(nombre, args)
+            else:
+                return NodoIdent(self.coincidir('IDENTIFICADOR'))
 
         if token[0] == 'CADENA':
             return NodoString(self.coincidir('CADENA'))
